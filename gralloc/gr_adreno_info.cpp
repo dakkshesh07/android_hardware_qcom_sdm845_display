@@ -74,6 +74,8 @@ AdrenoMemInfo::AdrenoMemInfo() {
         ::dlsym(libadreno_utils_, "adreno_init_memory_layout");
     *reinterpret_cast<void **>(&LINK_adreno_get_aligned_gpu_buffer_size) =
         ::dlsym(libadreno_utils_, "adreno_get_aligned_gpu_buffer_size");
+    *reinterpret_cast<void **>(&LINK_adreno_isSecureContextSupportedByGpu) =
+        ::dlsym(libadreno_utils_, "isSecureContextSupportedByGpu");
   } else {
     ALOGE(" Failed to load libadreno_utils.so");
   }
@@ -270,6 +272,21 @@ bool AdrenoMemInfo::AdrenoSizeAPIAvaliable() {
 
   return (LINK_adreno_get_metadata_blob_size && LINK_adreno_init_memory_layout &&
           LINK_adreno_get_aligned_gpu_buffer_size);
+}
+
+bool AdrenoMemInfo::IsPISupportedByGPU(int format, uint64_t usage) {
+  if (LINK_adreno_isPISupportedByGpu) {
+    return LINK_adreno_isPISupportedByGpu(format, usage);
+  }
+  return false;
+}
+
+bool AdrenoMemInfo::isSecureContextSupportedByGpu() {
+  if(LINK_adreno_isSecureContextSupportedByGpu) {
+    bool isSupported = LINK_adreno_isSecureContextSupportedByGpu();
+    return isSupported;
+  }
+  return true;
 }
 
 }  // namespace gralloc
