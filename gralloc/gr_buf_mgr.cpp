@@ -300,7 +300,7 @@ int BufferManager::GetHandleFlags(int format, uint64_t usage) {
 }
 
 Error BufferManager::AllocateBuffer(const BufferDescriptor &descriptor, buffer_handle_t *handle,
-                                    unsigned int bufferSize) {
+                                    unsigned int bufferSize, bool testAlloc) {
   if (!handle)
     return Error::BAD_BUFFER;
   std::lock_guard<std::mutex> buffer_lock(buffer_lock_);
@@ -319,6 +319,10 @@ Error BufferManager::AllocateBuffer(const BufferDescriptor &descriptor, buffer_h
 
   GraphicsMetadata graphics_metadata = {};
   GetBufferSizeAndDimensions(info, &size, &alignedw, &alignedh, &graphics_metadata);
+
+  if (testAlloc) {
+    return Error::NONE;
+  }
 
   size = (bufferSize >= size) ? bufferSize : size;
   int err = 0;
