@@ -28,6 +28,9 @@
  */
 
 #include <media/msm_media_info.h>
+
+#include <drm/drm_fourcc.h>
+
 #include <algorithm>
 
 #include "gr_adreno_info.h"
@@ -1096,6 +1099,462 @@ bool GetAdrenoSizeAPIStatus() {
 
 int GetBufferType(int inputFormat) {
   return IsYuvFormat(inputFormat) ? BUFFER_TYPE_VIDEO : BUFFER_TYPE_UI;
+}
+
+int GetYUVPlaneInfo(const BufferInfo &info, int32_t format, int32_t width, int32_t height,
+                    int32_t flags, int *plane_count, PlaneLayoutInfo *plane_info) {
+  int err = 0;
+  unsigned int y_stride, c_stride, y_height, c_height, y_size, c_size;
+  uint64_t yOffset, cOffset, crOffset, cbOffset;
+  int h_subsampling = 0, v_subsampling = 0;
+  switch (format) {
+    // Semiplanar
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP:
+    case HAL_PIXEL_FORMAT_YCbCr_422_SP:
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS:
+    case HAL_PIXEL_FORMAT_NV12_ENCODEABLE:
+    case HAL_PIXEL_FORMAT_NV21_ENCODEABLE:
+    case HAL_PIXEL_FORMAT_NV12_HEIF:  // Same as YCbCr_420_SP_VENUS
+    case HAL_PIXEL_FORMAT_YCrCb_420_SP:
+    case HAL_PIXEL_FORMAT_YCrCb_422_SP:
+    case HAL_PIXEL_FORMAT_YCrCb_420_SP_ADRENO:
+    case HAL_PIXEL_FORMAT_YCrCb_420_SP_VENUS:
+    case HAL_PIXEL_FORMAT_NV21_ZSL:
+    case HAL_PIXEL_FORMAT_RAW16:
+    case HAL_PIXEL_FORMAT_Y16:
+    case HAL_PIXEL_FORMAT_RAW10:
+    case HAL_PIXEL_FORMAT_RAW8:
+    case HAL_PIXEL_FORMAT_Y8:
+      *plane_count = 2;
+      GetYuvSPPlaneInfo(info, format, width, height, 1, plane_info);
+      GetYuvSubSamplingFactor(format, &h_subsampling, &v_subsampling);
+      plane_info[0].h_subsampling = 0;
+      plane_info[0].v_subsampling = 0;
+      plane_info[1].h_subsampling = h_subsampling;
+      plane_info[1].v_subsampling = v_subsampling;
+      break;
+
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS_UBWC:
+      GetYuvSubSamplingFactor(format, &h_subsampling, &v_subsampling);
+      if (flags & LAYOUT_INTERLACED_FLAG) {
+        *plane_count = 8;
+        GetYuvUbwcInterlacedSPPlaneInfo(width, height, plane_info);
+        plane_info[0].step = plane_info[4].step = 1;
+        plane_info[1].step = plane_info[5].step = 2;
+        plane_info[0].h_subsampling = plane_info[4].h_subsampling = 0;
+        plane_info[0].v_subsampling = plane_info[4].v_subsampling = 0;
+        plane_info[1].h_subsampling = plane_info[5].h_subsampling = h_subsampling;
+        plane_info[1].v_subsampling = plane_info[5].v_subsampling = v_subsampling;
+        plane_info[2].h_subsampling = plane_info[3].h_subsampling = 0;
+        plane_info[2].v_subsampling = plane_info[3].v_subsampling = 0;
+        plane_info[2].step = plane_info[3].step = 0;
+        plane_info[6].h_subsampling = plane_info[7].h_subsampling = 0;
+        plane_info[6].v_subsampling = plane_info[7].v_subsampling = 0;
+        plane_info[6].step = plane_info[7].step = 0;
+      } else {
+        *plane_count = 4;
+        GetYuvUbwcSPPlaneInfo(width, height, COLOR_FMT_NV12_UBWC, plane_info);
+        plane_info[0].h_subsampling = 0;
+        plane_info[0].v_subsampling = 0;
+        plane_info[0].step = 1;
+        plane_info[1].h_subsampling = h_subsampling;
+        plane_info[1].v_subsampling = v_subsampling;
+        plane_info[1].step = 2;
+        plane_info[2].h_subsampling = plane_info[3].h_subsampling = 0;
+        plane_info[2].v_subsampling = plane_info[3].v_subsampling = 0;
+        plane_info[2].step = plane_info[3].step = 0;
+      }
+      break;
+
+    case HAL_PIXEL_FORMAT_YCbCr_420_P010:
+      *plane_count = 2;
+      GetYuvSPPlaneInfo(info, format, width, height, 2, plane_info);
+      GetYuvSubSamplingFactor(format, &h_subsampling, &v_subsampling);
+      plane_info[0].h_subsampling = 0;
+      plane_info[0].v_subsampling = 0;
+      plane_info[1].h_subsampling = h_subsampling;
+      plane_info[1].v_subsampling = v_subsampling;
+      break;
+
+    case HAL_PIXEL_FORMAT_YCbCr_420_TP10_UBWC:
+      *plane_count = 4;
+      GetYuvUbwcSPPlaneInfo(width, height, COLOR_FMT_NV12_BPP10_UBWC, plane_info);
+      GetYuvSubSamplingFactor(format, &h_subsampling, &v_subsampling);
+      plane_info[0].h_subsampling = 0;
+      plane_info[0].v_subsampling = 0;
+      plane_info[1].step = 1;
+      plane_info[1].h_subsampling = h_subsampling;
+      plane_info[1].v_subsampling = v_subsampling;
+      plane_info[1].step = 3;
+      plane_info[2].h_subsampling = plane_info[3].h_subsampling = 0;
+      plane_info[2].v_subsampling = plane_info[3].v_subsampling = 0;
+      plane_info[2].step = plane_info[3].step = 0;
+      break;
+
+    case HAL_PIXEL_FORMAT_YCbCr_420_P010_UBWC:
+      *plane_count = 4;
+      GetYuvUbwcSPPlaneInfo(width, height, COLOR_FMT_P010_UBWC, plane_info);
+      GetYuvSubSamplingFactor(format, &h_subsampling, &v_subsampling);
+      plane_info[0].h_subsampling = 0;
+      plane_info[0].v_subsampling = 0;
+      plane_info[1].step = 1;
+      plane_info[1].h_subsampling = h_subsampling;
+      plane_info[1].v_subsampling = v_subsampling;
+      plane_info[1].step = 4;
+      plane_info[2].h_subsampling = plane_info[3].h_subsampling = 0;
+      plane_info[2].v_subsampling = plane_info[3].v_subsampling = 0;
+      plane_info[2].step = plane_info[3].step = 0;
+      break;
+
+    case HAL_PIXEL_FORMAT_YCbCr_420_P010_VENUS:
+      *plane_count = 2;
+      y_stride = VENUS_Y_STRIDE(COLOR_FMT_P010, width);
+      c_stride = VENUS_UV_STRIDE(COLOR_FMT_P010, width);
+      y_height = VENUS_Y_SCANLINES(COLOR_FMT_P010, height);
+      y_size = y_stride * y_height;
+      yOffset = 0;
+      cOffset = y_size;
+      c_height = VENUS_UV_SCANLINES(COLOR_FMT_P010, INT(height));
+      c_size = c_stride * c_height;
+      GetYuvSubSamplingFactor(format, &h_subsampling, &v_subsampling);
+
+      plane_info[0].component = (PlaneComponent)PLANE_COMPONENT_Y;
+      plane_info[0].offset = (uint32_t)yOffset;
+      plane_info[0].stride = static_cast<int32_t>(UINT(width));
+      plane_info[0].stride_bytes = static_cast<int32_t>(y_stride);
+      plane_info[0].scanlines = static_cast<int32_t>(y_height);
+      plane_info[0].size = static_cast<uint32_t>(y_size);
+      plane_info[0].step = 1;
+      plane_info[0].h_subsampling = 0;
+      plane_info[0].v_subsampling = 0;
+
+      plane_info[1].component = (PlaneComponent)(PLANE_COMPONENT_Cb | PLANE_COMPONENT_Cr);
+      plane_info[1].offset = (uint32_t)cOffset;
+      plane_info[1].stride = static_cast<int32_t>(UINT(width));
+      plane_info[1].stride_bytes = static_cast<int32_t>(c_stride);
+      plane_info[1].scanlines = static_cast<int32_t>(c_height);
+      plane_info[1].size = static_cast<uint32_t>(c_size);
+      plane_info[1].step = 4;
+      plane_info[1].h_subsampling = h_subsampling;
+      plane_info[1].v_subsampling = v_subsampling;
+      break;
+
+      // Planar
+    case HAL_PIXEL_FORMAT_YV12:
+      if ((info.width & 1) || (info.height & 1)) {
+        ALOGE("w or h is odd for the YV12 format");
+        err = -EINVAL;
+        return err;
+      }
+      *plane_count = 3;
+      y_stride = width;
+      c_stride = ALIGN(width / 2, 16);
+      y_height = UINT(height);
+      y_size = (y_stride * y_height);
+      height = height >> 1;
+      c_height = UINT(height);
+      c_size = (c_stride * c_height);
+      yOffset = 0;
+      crOffset = y_size;
+      cbOffset = (y_size + c_size);
+      GetYuvSubSamplingFactor(format, &h_subsampling, &v_subsampling);
+
+      plane_info[0].component = (PlaneComponent)PLANE_COMPONENT_Y;
+      plane_info[0].offset = (uint32_t)yOffset;
+      plane_info[0].stride = static_cast<int32_t>(UINT(width));
+      plane_info[0].stride_bytes = static_cast<int32_t>(y_stride);
+      plane_info[0].scanlines = static_cast<int32_t>(y_height);
+      plane_info[0].size = static_cast<uint32_t>(y_size);
+      plane_info[0].step = 1;
+      plane_info[0].h_subsampling = 0;
+      plane_info[0].v_subsampling = 0;
+
+      plane_info[1].component = (PlaneComponent)PLANE_COMPONENT_Cb;
+      plane_info[1].offset = (uint32_t)cbOffset;
+      plane_info[2].component = (PlaneComponent)PLANE_COMPONENT_Cr;
+      plane_info[2].offset = (uint32_t)crOffset;
+      for (int i = 1; i < 3; i++) {
+        plane_info[i].stride = static_cast<int32_t>(UINT(width));
+        plane_info[i].stride_bytes = static_cast<int32_t>(c_stride);
+        plane_info[i].scanlines = static_cast<int32_t>(c_height);
+        plane_info[i].size = static_cast<uint32_t>(c_size);
+        plane_info[i].step = 1;
+        plane_info[i].h_subsampling = h_subsampling;
+        plane_info[i].v_subsampling = v_subsampling;
+      }
+      break;
+    case HAL_PIXEL_FORMAT_CbYCrY_422_I:
+      if (info.width & 1) {
+        ALOGE("width is odd for the YUV422_SP format");
+        err = -EINVAL;
+        return err;
+      }
+      *plane_count = 1;
+      y_stride = width * 2;
+      y_height = UINT(height);
+      y_size = y_stride * y_height;
+      yOffset = 0;
+      plane_info[0].component = (PlaneComponent)PLANE_COMPONENT_Y;
+      plane_info[0].offset = (uint32_t)yOffset;
+      plane_info[0].stride = static_cast<int32_t>(UINT(width));
+      plane_info[0].stride_bytes = static_cast<int32_t>(y_stride);
+      plane_info[0].scanlines = static_cast<int32_t>(y_height);
+      plane_info[0].size = static_cast<uint32_t>(y_size);
+      plane_info[0].step = 1;
+      plane_info[0].h_subsampling = 0;
+      plane_info[0].v_subsampling = 0;
+      break;
+
+      // Unsupported formats
+    case HAL_PIXEL_FORMAT_YCbCr_422_I:
+    case HAL_PIXEL_FORMAT_YCrCb_422_I:
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED:
+    default:
+      *plane_count = 0;
+      ALOGD("%s: Invalid format passed: 0x%x", __FUNCTION__, format);
+      err = -EINVAL;
+  }
+  return err;
+}
+
+void GetYuvSubSamplingFactor(int32_t format, int *h_subsampling, int *v_subsampling) {
+  switch (format) {
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP:
+    case HAL_PIXEL_FORMAT_YCbCr_420_P010:
+    case HAL_PIXEL_FORMAT_YCbCr_420_TP10_UBWC:
+    case HAL_PIXEL_FORMAT_YCbCr_420_P010_UBWC:
+    case HAL_PIXEL_FORMAT_YCbCr_420_P010_VENUS:
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS:
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS_UBWC:
+    case HAL_PIXEL_FORMAT_YCrCb_420_SP_ADRENO:
+    case HAL_PIXEL_FORMAT_YCrCb_420_SP_VENUS:
+    case HAL_PIXEL_FORMAT_YCrCb_420_SP:
+    case HAL_PIXEL_FORMAT_NV12_ENCODEABLE:  // Same as YCbCr_420_SP_VENUS
+    case HAL_PIXEL_FORMAT_NV21_ENCODEABLE:
+    case HAL_PIXEL_FORMAT_NV21_ZSL:
+    case HAL_PIXEL_FORMAT_YV12:
+      *h_subsampling = 1;
+      *v_subsampling = 1;
+      break;
+    case HAL_PIXEL_FORMAT_YCbCr_422_SP:
+    case HAL_PIXEL_FORMAT_YCrCb_422_SP:
+    case HAL_PIXEL_FORMAT_CbYCrY_422_I:
+      *h_subsampling = 1;
+      *v_subsampling = 0;
+      break;
+    case HAL_PIXEL_FORMAT_RAW16:
+    case HAL_PIXEL_FORMAT_Y16:
+    case HAL_PIXEL_FORMAT_RAW12:
+    case HAL_PIXEL_FORMAT_RAW10:
+    case HAL_PIXEL_FORMAT_Y8:
+    case HAL_PIXEL_FORMAT_BLOB:
+    case HAL_PIXEL_FORMAT_RAW_OPAQUE:
+    case HAL_PIXEL_FORMAT_NV12_HEIF:
+    default:
+      *h_subsampling = 0;
+      *v_subsampling = 0;
+      break;
+  }
+}
+
+void CopyPlaneLayoutInfotoAndroidYcbcr(uint64_t base, int plane_count, PlaneLayoutInfo *plane_info,
+                                       struct android_ycbcr *ycbcr) {
+  ycbcr->y = reinterpret_cast<void *>(base + plane_info[0].offset);
+  ycbcr->ystride = plane_info[0].stride_bytes;
+  if (plane_count == 1) {
+    ycbcr->cb = NULL;
+    ycbcr->cr = NULL;
+    ycbcr->cstride = 0;
+    ycbcr->chroma_step = 0;
+  } else if (plane_count == 2 || plane_count == 4 || plane_count == 8) {
+    /* For YUV semiplanar :-
+     *   - In progressive & linear case plane count is 2 and plane_info[0] will
+     *     contain info about Y plane and plane_info[1] will contain info about UV plane.
+     *   - In progressive & compressed case plane count is 4 then plane_info[0] will
+     *     contain info about Y plane and plane_info[1] will contain info about UV plane.
+     *     Remaining two plane (plane_info[2] & plane_info[3]) contain info about the
+     *     Y_Meta_Plane and UV_Meta_Plane.
+     *   - In interlaced & compressed case plane count is 8 then plane_info[0], plane_info[1],
+     *     plane_info[4] & plane_info[5] will contain info about Y_plane, UV_plane, Y_plane
+     *     & UV_plane. Remaining plane will contain info about the meta planes. As in this case
+     *     this API is called twice through GetYUVPlaneInfo() with address of plane_info[0] &
+     *     plane_info[4], so this will calculate the information accordingly and will fill the
+     *     ycbcr structure with interlaced plane info only.
+     */
+    ycbcr->cb = reinterpret_cast<void *>(base + plane_info[1].offset);
+    ycbcr->cr = reinterpret_cast<void *>(base + plane_info[1].offset + 1);
+    ycbcr->cstride = plane_info[1].stride_bytes;
+    ycbcr->chroma_step = plane_info[1].step;
+  } else if (plane_count == 3) {
+    /* For YUV planar :-
+     * Plane size is 3 and plane_info[0], plane_info[1], plane_info[2] will
+     * contain info about y_plane, cb_plane and cr_plane accordingly.
+     */
+    ycbcr->cb = reinterpret_cast<void *>(base + plane_info[1].offset);
+    ycbcr->cr = reinterpret_cast<void *>(base + plane_info[2].offset);
+    ycbcr->cstride = plane_info[1].stride_bytes;
+    ycbcr->chroma_step = plane_info[1].step;
+  }
+}
+
+bool HasAlphaComponent(int32_t format) {
+  switch (format) {
+    case HAL_PIXEL_FORMAT_RGBA_8888:
+    case HAL_PIXEL_FORMAT_BGRA_8888:
+    case HAL_PIXEL_FORMAT_RGBA_5551:
+    case HAL_PIXEL_FORMAT_RGBA_4444:
+    case HAL_PIXEL_FORMAT_RGBA_1010102:
+    case HAL_PIXEL_FORMAT_ARGB_2101010:
+    case HAL_PIXEL_FORMAT_BGRA_1010102:
+    case HAL_PIXEL_FORMAT_ABGR_2101010:
+    case HAL_PIXEL_FORMAT_RGBA_FP16:
+      return true;
+    default:
+      return false;
+  }
+}
+
+void GetRGBPlaneInfo(const BufferInfo &info, int32_t format, int32_t width, int32_t height,
+                     int32_t /* flags */, int *plane_count, PlaneLayoutInfo *plane_info) {
+  uint64_t usage = info.usage;
+  *plane_count = 1;
+  uint32_t bpp = 0;
+  if (IsUncompressedRGBFormat(format)) {
+    bpp = GetBppForUncompressedRGB(format);
+  }
+  plane_info->component =
+      (PlaneComponent)(PLANE_COMPONENT_R | PLANE_COMPONENT_G | PLANE_COMPONENT_B);
+  if (HasAlphaComponent(format)) {
+    plane_info->component = (PlaneComponent)(plane_info->component | PLANE_COMPONENT_A);
+  }
+  plane_info->size = GetSize(info, width, height);
+  plane_info->step = bpp;
+  plane_info->offset = GetRgbMetaSize(format, width, height, usage);
+  plane_info->h_subsampling = 0;
+  plane_info->v_subsampling = 0;
+  plane_info->stride = width;
+  plane_info->stride_bytes = width * plane_info->step;
+  plane_info->scanlines = height;
+}
+
+// TODO(tbalacha): tile vs ubwc -- may need to find a diff way to differentiate
+void GetDRMFormat(uint32_t format, uint32_t flags, uint32_t *drm_format,
+                  uint64_t *drm_format_modifier) {
+  bool compressed = (flags & private_handle_t::PRIV_FLAGS_UBWC_ALIGNED) ? true : false;
+  switch (format) {
+    case HAL_PIXEL_FORMAT_RGBA_8888:
+      *drm_format = DRM_FORMAT_ABGR8888;
+      break;
+    case HAL_PIXEL_FORMAT_RGBA_5551:
+      *drm_format = DRM_FORMAT_ABGR1555;
+      break;
+    case HAL_PIXEL_FORMAT_RGBA_4444:
+      *drm_format = DRM_FORMAT_ABGR4444;
+      break;
+    case HAL_PIXEL_FORMAT_BGRA_8888:
+      *drm_format = DRM_FORMAT_ARGB8888;
+      break;
+    case HAL_PIXEL_FORMAT_RGBX_8888:
+      *drm_format = DRM_FORMAT_XBGR8888;
+      if (compressed)
+        *drm_format_modifier = DRM_FORMAT_MOD_QCOM_COMPRESSED;
+      break;
+    case HAL_PIXEL_FORMAT_BGRX_8888:
+      *drm_format = DRM_FORMAT_XRGB8888;
+      break;
+    case HAL_PIXEL_FORMAT_RGB_888:
+      *drm_format = DRM_FORMAT_BGR888;
+      break;
+    case HAL_PIXEL_FORMAT_RGB_565:
+      *drm_format = DRM_FORMAT_BGR565;
+      break;
+    case HAL_PIXEL_FORMAT_BGR_565:
+      *drm_format = DRM_FORMAT_BGR565;
+      if (compressed)
+        *drm_format_modifier = DRM_FORMAT_MOD_QCOM_COMPRESSED;
+      break;
+    case HAL_PIXEL_FORMAT_RGBA_1010102:
+      *drm_format = DRM_FORMAT_ABGR2101010;
+      if (compressed)
+        *drm_format_modifier = DRM_FORMAT_MOD_QCOM_COMPRESSED;
+      break;
+    case HAL_PIXEL_FORMAT_ARGB_2101010:
+      *drm_format = DRM_FORMAT_BGRA1010102;
+      break;
+    case HAL_PIXEL_FORMAT_RGBX_1010102:
+      *drm_format = DRM_FORMAT_XBGR2101010;
+      if (compressed)
+        *drm_format_modifier = DRM_FORMAT_MOD_QCOM_COMPRESSED;
+      break;
+    case HAL_PIXEL_FORMAT_XRGB_2101010:
+      *drm_format = DRM_FORMAT_BGRX1010102;
+      break;
+    case HAL_PIXEL_FORMAT_BGRA_1010102:
+      *drm_format = DRM_FORMAT_ARGB2101010;
+      break;
+    case HAL_PIXEL_FORMAT_ABGR_2101010:
+      *drm_format = DRM_FORMAT_RGBA1010102;
+      break;
+    case HAL_PIXEL_FORMAT_BGRX_1010102:
+      *drm_format = DRM_FORMAT_XRGB2101010;
+      break;
+    case HAL_PIXEL_FORMAT_XBGR_2101010:
+      *drm_format = DRM_FORMAT_RGBX1010102;
+      break;
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS:
+      *drm_format = DRM_FORMAT_NV12;
+      break;
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS_UBWC:
+      *drm_format = DRM_FORMAT_NV12;
+      if (compressed) {
+        *drm_format_modifier = DRM_FORMAT_MOD_QCOM_COMPRESSED;
+      } else {
+        *drm_format_modifier = DRM_FORMAT_MOD_QCOM_TILE;
+      }
+      break;
+    case HAL_PIXEL_FORMAT_YCrCb_420_SP:
+      *drm_format = DRM_FORMAT_NV21;
+      break;
+    case HAL_PIXEL_FORMAT_YCrCb_420_SP_VENUS:
+      *drm_format = DRM_FORMAT_NV21;
+      break;
+    case HAL_PIXEL_FORMAT_YCbCr_420_P010:
+    case HAL_PIXEL_FORMAT_YCbCr_420_P010_VENUS:
+      *drm_format = DRM_FORMAT_NV12;
+      *drm_format_modifier = DRM_FORMAT_MOD_QCOM_DX;
+      break;
+    case HAL_PIXEL_FORMAT_YCbCr_420_P010_UBWC:
+      *drm_format = DRM_FORMAT_NV12;
+      if (compressed) {
+        *drm_format_modifier = DRM_FORMAT_MOD_QCOM_COMPRESSED | DRM_FORMAT_MOD_QCOM_DX;
+      } else {
+        *drm_format_modifier = DRM_FORMAT_MOD_QCOM_TILE | DRM_FORMAT_MOD_QCOM_DX;
+      }
+      break;
+    case HAL_PIXEL_FORMAT_YCbCr_420_TP10_UBWC:
+      *drm_format = DRM_FORMAT_NV12;
+      if (compressed) {
+        *drm_format_modifier =
+            DRM_FORMAT_MOD_QCOM_COMPRESSED | DRM_FORMAT_MOD_QCOM_DX | DRM_FORMAT_MOD_QCOM_TIGHT;
+      } else {
+        *drm_format_modifier =
+            DRM_FORMAT_MOD_QCOM_TILE | DRM_FORMAT_MOD_QCOM_DX | DRM_FORMAT_MOD_QCOM_TIGHT;
+      }
+      break;
+    case HAL_PIXEL_FORMAT_YCbCr_422_SP:
+      *drm_format = DRM_FORMAT_NV16;
+      break;
+      /*
+    TODO: No HAL_PIXEL_FORMAT equivalent?
+    case kFormatYCrCb422H2V1SemiPlanar:
+      *drm_format = DRM_FORMAT_NV61;
+      break;*/
+    case HAL_PIXEL_FORMAT_YV12:
+      *drm_format = DRM_FORMAT_YVU420;
+      break;
+    default:
+      ALOGE("Unsupported format %d", format);
+  }
 }
 
 }  // namespace gralloc
