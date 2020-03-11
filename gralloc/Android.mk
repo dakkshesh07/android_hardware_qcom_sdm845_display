@@ -73,6 +73,9 @@ else ifeq ($(TARGET_USES_YCRCB_VENUS_CAMERA_PREVIEW),true)
     LOCAL_CFLAGS              += -DUSE_YCRCB_CAMERA_PREVIEW_VENUS
 endif
 
+ifneq ($(TARGET_USES_GRALLOC4),false)
+LOCAL_CFLAGS                  += -DTARGET_USES_GRALLOC4
+endif
 LOCAL_ADDITIONAL_DEPENDENCIES := $(common_deps)
 LOCAL_SRC_FILES               := gr_allocator.cpp gr_buf_mgr.cpp gr_ion_alloc.cpp
 include $(BUILD_SHARED_LIBRARY)
