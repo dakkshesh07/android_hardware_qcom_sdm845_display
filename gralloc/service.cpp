@@ -37,6 +37,7 @@ using vendor::qti::hardware::display::allocator::V1_0::implementation::QtiAlloca
 int main(int, char **) {
   android::sp<IQtiAllocator> service = new QtiAllocator();
   configureRpcThreadpool(4, true /*callerWillJoin*/);
+  android::hardware::setMinSchedulerPolicy(service3, SCHED_NORMAL, -20);
   if (service->registerAsService() != android::OK) {
     ALOGE("Cannot register QTI Allocator service");
     return -EINVAL;
