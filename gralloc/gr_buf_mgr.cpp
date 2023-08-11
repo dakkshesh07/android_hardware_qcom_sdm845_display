@@ -567,6 +567,31 @@ static Error getComponentSizeAndOffset(int32_t format, PlaneLayoutComponent &com
         return Error::BAD_VALUE;
       }
       break;
+    case static_cast<int32_t>(HAL_PIXEL_FORMAT_RAW16):
+      if (comp.type.value == android::gralloc4::PlaneLayoutComponentType_RAW.value) {
+        comp.offsetInBits = 0;
+        comp.sizeInBits = 16;
+      } else {
+        return Error::BAD_VALUE;
+      }
+      break;
+    case static_cast<int32_t>(HAL_PIXEL_FORMAT_RAW12):
+    case static_cast<int32_t>(HAL_PIXEL_FORMAT_RAW10):
+      if (comp.type.value == android::gralloc4::PlaneLayoutComponentType_RAW.value) {
+        comp.offsetInBits = 0;
+        comp.sizeInBits = -1;
+      } else {
+        return Error::BAD_VALUE;
+      }
+      break;
+    case static_cast<int32_t>(HAL_PIXEL_FORMAT_RAW8):
+      if (comp.type.value == android::gralloc4::PlaneLayoutComponentType_RAW.value) {
+        comp.offsetInBits = 0;
+        comp.sizeInBits = 8;
+      } else {
+        return Error::BAD_VALUE;
+      }
+      break;
     default:
       ALOGI_IF(DEBUG, "Offset and size in bits unknown for format %d", format);
       return Error::UNSUPPORTED;
@@ -624,8 +649,9 @@ static void grallocToStandardPlaneLayoutComponentType(uint32_t in,
   }
 
   if (in & PLANE_COMPONENT_RAW) {
-    comp.type = qtigralloc::PlaneLayoutComponentType_Raw;
-    components->push_back(comp);
+    comp.type = android::gralloc4::PlaneLayoutComponentType_RAW;
+    if (getComponentSizeAndOffset(format, comp) == Error::NONE)
+      components->push_back(comp);
   }
 
   if (in & PLANE_COMPONENT_META) {
@@ -687,6 +713,7 @@ BufferManager::~BufferManager() {
 
 void BufferManager::SetGrallocDebugProperties(gralloc::GrallocProperties props) {
   allocator_->SetProperties(props);
+  AdrenoMemInfo::GetInstance()->AdrenoSetProperties(props);
 }
 
 Error BufferManager::FreeBuffer(std::shared_ptr<Buffer> buf) {
@@ -722,8 +749,11 @@ Error BufferManager::FreeBuffer(std::shared_ptr<Buffer> buf) {
 
 Error BufferManager::ValidateBufferSize(private_handle_t const *hnd, BufferInfo info) {
   unsigned int size, alignedw, alignedh;
-  info.format = allocator_->GetImplDefinedFormat(info.usage, info.format);
-  GetBufferSizeAndDimensions(info, &size, &alignedw, &alignedh);
+  info.format = GetImplDefinedFormat(info.usage, info.format);
+  int ret = GetBufferSizeAndDimensions(info, &size, &alignedw, &alignedh);
+  if (ret < 0) {
+    return Error::BAD_BUFFER;
+  }
   auto ion_fd_size = static_cast<unsigned int>(lseek(hnd->fd, 0, SEEK_END));
   if (size != ion_fd_size) {
     return Error::BAD_VALUE;
@@ -838,7 +868,7 @@ Error BufferManager::ReleaseBuffer(private_handle_t const *hnd) {
   std::lock_guard<std::mutex> lock(buffer_lock_);
   auto buf = GetBufferFromHandleLocked(hnd);
   if (buf == nullptr) {
-    ALOGE("Could not find handle: %p", hnd);
+    ALOGE("Could not find handle: %p id: %" PRIu64, hnd, hnd->id);
     return Error::BAD_BUFFER;
   } else {
     if (buf->DecRef()) {
@@ -878,7 +908,7 @@ Error BufferManager::LockBuffer(const private_handle_t *hnd, uint64_t usage) {
   if (err == Error::NONE && (hnd->flags & private_handle_t::PRIV_FLAGS_USES_ION) &&
       (hnd->flags & private_handle_t::PRIV_FLAGS_CACHED)) {
     if (allocator_->CleanBuffer(reinterpret_cast<void *>(hnd->base), hnd->size, hnd->offset,
-                                buf->ion_handle_main, CACHE_INVALIDATE)) {
+                                buf->ion_handle_main, CACHE_INVALIDATE, hnd->fd)) {
       return Error::BAD_BUFFER;
     }
   }
@@ -940,59 +970,18 @@ Error BufferManager::UnlockBuffer(const private_handle_t *handle) {
 
   if (hnd->flags & private_handle_t::PRIV_FLAGS_NEEDS_FLUSH) {
     if (allocator_->CleanBuffer(reinterpret_cast<void *>(hnd->base), hnd->size, hnd->offset,
-                                buf->ion_handle_main, CACHE_CLEAN) != 0) {
+                                buf->ion_handle_main, CACHE_CLEAN, hnd->fd) != 0) {
       status = Error::BAD_BUFFER;
     }
     hnd->flags &= ~private_handle_t::PRIV_FLAGS_NEEDS_FLUSH;
+  } else {
+    if (allocator_->CleanBuffer(reinterpret_cast<void *>(hnd->base), hnd->size, hnd->offset,
+                                buf->ion_handle_main, CACHE_READ_DONE, hnd->fd) != 0) {
+      status = Error::BAD_BUFFER;
+    }
   }
 
   return status;
-}
-
-int BufferManager::GetHandleFlags(int format, uint64_t usage) {
-  int flags = 0;
-  if (usage & BufferUsage::VIDEO_ENCODER) {
-    flags |= private_handle_t::PRIV_FLAGS_VIDEO_ENCODER;
-  }
-
-  if (usage & BufferUsage::CAMERA_OUTPUT) {
-    flags |= private_handle_t::PRIV_FLAGS_CAMERA_WRITE;
-  }
-
-  if (usage & BufferUsage::CAMERA_INPUT) {
-    flags |= private_handle_t::PRIV_FLAGS_CAMERA_READ;
-  }
-
-  if (usage & BufferUsage::COMPOSER_OVERLAY) {
-    flags |= private_handle_t::PRIV_FLAGS_DISP_CONSUMER;
-  }
-
-  if (usage & BufferUsage::GPU_TEXTURE) {
-    flags |= private_handle_t::PRIV_FLAGS_HW_TEXTURE;
-  }
-
-  if (usage & GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY) {
-    flags |= private_handle_t::PRIV_FLAGS_SECURE_DISPLAY;
-  }
-
-  if (IsUBwcEnabled(format, usage)) {
-    flags |= private_handle_t::PRIV_FLAGS_UBWC_ALIGNED;
-  }
-
-  if (usage & (BufferUsage::CPU_READ_MASK | BufferUsage::CPU_WRITE_MASK)) {
-    flags |= private_handle_t::PRIV_FLAGS_CPU_RENDERED;
-  }
-
-  if ((usage & (BufferUsage::VIDEO_ENCODER | BufferUsage::VIDEO_DECODER |
-                BufferUsage::CAMERA_OUTPUT | BufferUsage::GPU_RENDER_TARGET))) {
-    flags |= private_handle_t::PRIV_FLAGS_NON_CPU_WRITER;
-  }
-
-  if (!allocator_->UseUncached(usage)) {
-    flags |= private_handle_t::PRIV_FLAGS_CACHED;
-  }
-
-  return flags;
 }
 
 Error BufferManager::AllocateBuffer(const BufferDescriptor &descriptor, buffer_handle_t *handle,
@@ -1002,7 +991,10 @@ Error BufferManager::AllocateBuffer(const BufferDescriptor &descriptor, buffer_h
   std::lock_guard<std::mutex> buffer_lock(buffer_lock_);
 
   uint64_t usage = descriptor.GetUsage();
-  int format = allocator_->GetImplDefinedFormat(usage, descriptor.GetFormat());
+  if (!IsGPUFlagSupported(usage)) {
+     return Error::UNSUPPORTED;
+  }
+  int format = GetImplDefinedFormat(usage, descriptor.GetFormat());
   uint32_t layer_count = descriptor.GetLayerCount();
 
   // Check if GPU supports requested hardware buffer usage
@@ -1013,6 +1005,7 @@ Error BufferManager::AllocateBuffer(const BufferDescriptor &descriptor, buffer_h
 
   unsigned int size;
   unsigned int alignedw, alignedh;
+  int err = 0;
 
   int buffer_type = GetBufferType(format);
   BufferInfo info = GetBufferInfo(descriptor);
@@ -1020,7 +1013,10 @@ Error BufferManager::AllocateBuffer(const BufferDescriptor &descriptor, buffer_h
   info.layer_count = layer_count;
 
   GraphicsMetadata graphics_metadata = {};
-  GetBufferSizeAndDimensions(info, &size, &alignedw, &alignedh, &graphics_metadata);
+  err = GetBufferSizeAndDimensions(info, &size, &alignedw, &alignedh, &graphics_metadata);
+  if (err < 0) {
+    return Error::BAD_DESCRIPTOR;
+  }
 
   if (size == 0) {
     return Error::UNSUPPORTED;
@@ -1031,19 +1027,19 @@ Error BufferManager::AllocateBuffer(const BufferDescriptor &descriptor, buffer_h
   }
 
   size = (bufferSize >= size) ? bufferSize : size;
-  int err = 0;
-  int flags = 0;
+  uint64_t flags = 0;
   auto page_size = UINT(getpagesize());
   AllocData data;
   data.align = GetDataAlignment(format, usage);
   data.size = size;
   data.handle = (uintptr_t)handle;
-  data.uncached = allocator_->UseUncached(usage);
+  data.uncached = UseUncached(format, usage);
 
   // Allocate buffer memory
-  err = allocator_->AllocateMem(&data, usage);
+  err = allocator_->AllocateMem(&data, usage, format);
   if (err) {
-    ALOGE("gralloc failed to allocate err=%s", strerror(-err));
+    ALOGE("gralloc failed to allocate err=%s format %d size %d WxH %dx%d usage %" PRIu64,
+          strerror(-err), format, size, alignedw, alignedh, usage);
     return Error::NO_RESOURCES;
   }
 
@@ -1053,7 +1049,7 @@ Error BufferManager::AllocateBuffer(const BufferDescriptor &descriptor, buffer_h
   e_data.handle = data.handle;
   e_data.align = page_size;
 
-  err = allocator_->AllocateMem(&e_data, 0);
+  err = allocator_->AllocateMem(&e_data, 0, 0);
   if (err) {
     ALOGE("gralloc failed to allocate metadata error=%s", strerror(-err));
     return Error::NO_RESOURCES;
@@ -1064,7 +1060,7 @@ Error BufferManager::AllocateBuffer(const BufferDescriptor &descriptor, buffer_h
 
   // Create handle
   private_handle_t *hnd = new private_handle_t(
-      data.fd, e_data.fd, flags, INT(alignedw), INT(alignedh), descriptor.GetWidth(),
+      data.fd, e_data.fd, INT(flags), INT(alignedw), INT(alignedh), descriptor.GetWidth(),
       descriptor.GetHeight(), format, buffer_type, data.size, usage);
 
   hnd->id = ++next_id_;

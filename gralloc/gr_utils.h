@@ -39,12 +39,12 @@
 #define SZ_4K 0x1000
 
 #define SIZE_4K 4096
-#define SIZE_8K 4096
+#define SIZE_8K 8192
 
-#ifdef MASTER_SIDE_CP
-#define SECURE_ALIGN SZ_4K
-#else
+#ifdef SLAVE_SIDE_CP
 #define SECURE_ALIGN SZ_1M
+#else  // MASTER_SIDE_CP
+#define SECURE_ALIGN SZ_4K
 #endif
 
 #define INT(exp) static_cast<int>(exp)
@@ -167,27 +167,36 @@ bool CpuCanRead(uint64_t usage);
 bool CpuCanWrite(uint64_t usage);
 int GetBpp(int format);
 unsigned int GetSize(const BufferInfo &d, unsigned int alignedw, unsigned int alignedh);
-void GetBufferSizeAndDimensions(const BufferInfo &d, unsigned int *size, unsigned int *alignedw,
-                                unsigned int *alignedh);
-void GetBufferSizeAndDimensions(const BufferInfo &d, unsigned int *size, unsigned int *alignedw,
-                                unsigned int *alignedh, GraphicsMetadata *graphics_metadata);
+int GetBufferSizeAndDimensions(const BufferInfo &d, unsigned int *size, unsigned int *alignedw,
+                               unsigned int *alignedh);
+int GetBufferSizeAndDimensions(const BufferInfo &d, unsigned int *size, unsigned int *alignedw,
+                               unsigned int *alignedh, GraphicsMetadata *graphics_metadata);
 void GetCustomDimensions(private_handle_t *hnd, int *stride, int *height);
 void GetColorSpaceFromMetadata(private_handle_t *hnd, int *color_space);
 void GetAlignedWidthAndHeight(const BufferInfo &d, unsigned int *aligned_w,
                               unsigned int *aligned_h);
 int GetYUVPlaneInfo(const private_handle_t *hnd, struct android_ycbcr ycbcr[2]);
+int GetYUVPlaneInfo(const BufferInfo &info, int32_t format, int32_t width, int32_t height,
+                    int32_t flags, int *plane_count, PlaneLayoutInfo plane_info[8]);
+void GetRGBPlaneInfo(const BufferInfo &info, int32_t format, int32_t width, int32_t height,
+                     int32_t flags, int *plane_count, PlaneLayoutInfo *plane_info);
+unsigned int GetRgbMetaSize(int format, uint32_t width, uint32_t height, uint64_t usage);
+void GetYuvSubSamplingFactor(int32_t format, int *h_subsampling, int *v_subsampling);
+void CopyPlaneLayoutInfotoAndroidYcbcr(uint64_t base, int plane_count, PlaneLayoutInfo *plane_info,
+                                       struct android_ycbcr *ycbcr);
 int GetRgbDataAddress(private_handle_t *hnd, void **rgb_data);
 bool IsUBwcFormat(int format);
 bool IsUBwcSupported(int format);
+bool IsUBwcPISupported(int format, uint64_t usage);
 bool IsUBwcEnabled(int format, uint64_t usage);
 void GetYuvUBwcWidthAndHeight(int width, int height, int format, unsigned int *aligned_w,
                               unsigned int *aligned_h);
-void GetYuvSPPlaneInfo(uint64_t base, uint32_t width, uint32_t height, uint32_t bpp,
-                       struct android_ycbcr *ycbcr);
-void GetYuvUbwcSPPlaneInfo(uint64_t base, uint32_t width, uint32_t height, int color_format,
-                           struct android_ycbcr *ycbcr);
-void GetYuvUbwcInterlacedSPPlaneInfo(uint64_t base, uint32_t width, uint32_t height,
-                                     int color_format, struct android_ycbcr ycbcr[2]);
+void GetYuvSPPlaneInfo(const BufferInfo &info, int format, uint32_t width, uint32_t height,
+                       uint32_t bpp, PlaneLayoutInfo *plane_info);
+void GetYuvUbwcSPPlaneInfo(uint32_t width, uint32_t height, int color_format,
+                           PlaneLayoutInfo *plane_info);
+void GetYuvUbwcInterlacedSPPlaneInfo(uint32_t width, uint32_t height,
+                                     PlaneLayoutInfo plane_info[8]);
 void GetRgbUBwcBlockSize(uint32_t bpp, int *block_width, int *block_height);
 unsigned int GetRgbUBwcMetaBufferSize(int width, int height, uint32_t bpp);
 unsigned int GetUBwcSize(int width, int height, int format, unsigned int alignedw,
@@ -195,14 +204,17 @@ unsigned int GetUBwcSize(int width, int height, int format, unsigned int aligned
 int GetBufferLayout(private_handle_t *hnd, uint32_t stride[4], uint32_t offset[4],
                     uint32_t *num_planes);
 uint32_t GetDataAlignment(int format, uint64_t usage);
-
-void GetGpuResourceSizeAndDimensions(const BufferInfo &info, unsigned int *size,
-                                     unsigned int *alignedw, unsigned int *alignedh,
-                                     GraphicsMetadata *graphics_metadata);
+int GetGpuResourceSizeAndDimensions(const BufferInfo &info, unsigned int *size,
+                                    unsigned int *alignedw, unsigned int *alignedh,
+                                    GraphicsMetadata *graphics_metadata);
 bool CanUseAdrenoForSize(int buffer_type, uint64_t usage);
 bool GetAdrenoSizeAPIStatus();
-bool IsGPUFlagSupported(uint64_t usage);
+bool UseUncached(int format, uint64_t usage);
+uint64_t GetHandleFlags(int format, uint64_t usage);
+int GetImplDefinedFormat(uint64_t usage, int format);
+int GetCustomFormatFlags(int format, uint64_t usage, int *custom_format, uint64_t *priv_flags);
 int GetBufferType(int inputFormat);
+bool IsGPUFlagSupported(uint64_t usage);
 bool HasAlphaComponent(int32_t format);
 
 void GetDRMFormat(uint32_t format, uint32_t flags, uint32_t *drm_format,
