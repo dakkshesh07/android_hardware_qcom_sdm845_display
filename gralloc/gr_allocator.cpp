@@ -28,9 +28,9 @@
  */
 
 #include <log/log.h>
+#include <cutils/properties.h>
 #include <algorithm>
 #include <vector>
-#include <cutils/properties.h>
 
 #include "gr_allocator.h"
 #include "gr_utils.h"
@@ -50,20 +50,32 @@
 #define ION_FLAG_CP_CAMERA_PREVIEW 0
 #endif
 
-#ifdef MASTER_SIDE_CP
-#define CP_HEAP_ID ION_SECURE_HEAP_ID
-#define SD_HEAP_ID ION_SECURE_DISPLAY_HEAP_ID
-#define ION_CP_FLAGS (ION_SECURE | ION_FLAG_CP_PIXEL)
-#define ION_SD_FLAGS (ION_SECURE | ION_FLAG_CP_SEC_DISPLAY)
-#define ION_SC_FLAGS (ION_SECURE | ION_FLAG_CP_CAMERA)
-#define ION_SC_PREVIEW_FLAGS (ION_SECURE | ION_FLAG_CP_CAMERA_PREVIEW)
-#else  // SLAVE_SIDE_CP
+#ifndef ION_SECURE
+#define ION_SECURE ION_FLAG_SECURE
+#endif
+
+#ifndef ION_FLAG_CP_CDSP
+#define ION_FLAG_CP_CDSP 0
+#endif
+
+#ifdef SLAVE_SIDE_CP
 #define CP_HEAP_ID ION_CP_MM_HEAP_ID
 #define SD_HEAP_ID CP_HEAP_ID
 #define ION_CP_FLAGS (ION_SECURE | ION_FLAG_ALLOW_NON_CONTIG)
 #define ION_SD_FLAGS ION_SECURE
 #define ION_SC_FLAGS ION_SECURE
 #define ION_SC_PREVIEW_FLAGS ION_SECURE
+#else  // MASTER_SIDE_CP
+#ifdef HYPERVISOR
+#define CP_HEAP_ID ION_SECURE_DISPLAY_HEAP_ID
+#else
+#define CP_HEAP_ID ION_SECURE_HEAP_ID
+#endif
+#define SD_HEAP_ID ION_SECURE_DISPLAY_HEAP_ID
+#define ION_CP_FLAGS (ION_SECURE | ION_FLAG_CP_PIXEL)
+#define ION_SD_FLAGS (ION_SECURE | ION_FLAG_CP_SEC_DISPLAY)
+#define ION_SC_FLAGS (ION_SECURE | ION_FLAG_CP_CAMERA)
+#define ION_SC_PREVIEW_FLAGS (ION_SECURE | ION_FLAG_CP_CAMERA_PREVIEW)
 #endif
 
 using std::shared_ptr;
@@ -100,7 +112,7 @@ void Allocator::SetProperties(gralloc::GrallocProperties props) {
 
 int Allocator::AllocateMem(AllocData *alloc_data, uint64_t usage, int format) {
   int ret;
-  alloc_data->uncached = UseUncached(usage);
+  alloc_data->uncached = UseUncached(format, usage);
 
   // After this point we should have the right heap set, there is no fallback
   GetIonHeapInfo(usage, &alloc_data->heap_id, &alloc_data->alloc_type, &alloc_data->flags);
@@ -139,9 +151,10 @@ int Allocator::FreeBuffer(void *base, unsigned int size, unsigned int offset, in
   return -EINVAL;
 }
 
-int Allocator::CleanBuffer(void *base, unsigned int size, unsigned int offset, int handle, int op) {
+int Allocator::CleanBuffer(void *base, unsigned int size, unsigned int offset, int handle, int op,
+                           int fd) {
   if (ion_allocator_) {
-    return ion_allocator_->CleanBuffer(base, size, offset, handle, op);
+    return ion_allocator_->CleanBuffer(base, size, offset, handle, op, fd);
   }
 
   return -EINVAL;
@@ -160,7 +173,7 @@ bool Allocator::CheckForBufferSharing(uint32_t num_descriptors,
   *max_index = -1;
   for (uint32_t i = 0; i < num_descriptors; i++) {
     // Check Cached vs non-cached and all the ION flags
-    cur_uncached = UseUncached(descriptors[i]->GetUsage());
+    cur_uncached = UseUncached(descriptors[i]->GetFormat(), descriptors[i]->GetUsage());
     GetIonHeapInfo(descriptors[i]->GetUsage(), &cur_heap_id, &cur_alloc_type, &cur_ion_flags);
 
     if (i > 0 && (cur_heap_id != prev_heap_id || cur_alloc_type != prev_alloc_type ||
@@ -185,90 +198,6 @@ bool Allocator::CheckForBufferSharing(uint32_t num_descriptors,
   return true;
 }
 
-int Allocator::GetImplDefinedFormat(uint64_t usage, int format) {
-  int gr_format = format;
-
-  // If input format is HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED then based on
-  // the usage bits, gralloc assigns a format.
-  if (format == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED ||
-      format == HAL_PIXEL_FORMAT_YCbCr_420_888) {
-    if (usage & GRALLOC_USAGE_PRIVATE_ALLOC_UBWC) {
-      // Use of 10BIT_TP and 10BIT bits is supposed to be mutually exclusive.
-      // Each bit maps to only one format. Here we will check one of the bits
-      // and ignore the other.
-      if (usage & GRALLOC_USAGE_PRIVATE_10BIT_TP) {
-        gr_format = HAL_PIXEL_FORMAT_YCbCr_420_TP10_UBWC;
-      } else if (usage & GRALLOC_USAGE_PRIVATE_10BIT) {
-        gr_format = HAL_PIXEL_FORMAT_YCbCr_420_P010_UBWC;
-      } else {
-        gr_format = HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS_UBWC;
-      }
-    } else if (usage & GRALLOC_USAGE_PRIVATE_10BIT) {
-      gr_format = HAL_PIXEL_FORMAT_YCbCr_420_P010_VENUS;
-    } else if (usage & BufferUsage::VIDEO_ENCODER) {
-      if (usage & GRALLOC1_PRODUCER_USAGE_PRIVATE_VIDEO_NV21_ENCODER) {
-            gr_format = HAL_PIXEL_FORMAT_NV21_ENCODEABLE;
-      } else {
-        gr_format = HAL_PIXEL_FORMAT_NV12_ENCODEABLE;  // NV12
-      }
-    } else if (usage & BufferUsage::CAMERA_INPUT) {
-      if (usage & BufferUsage::CAMERA_OUTPUT) {
-        // Assumed ZSL if both producer and consumer camera flags set
-        gr_format = HAL_PIXEL_FORMAT_NV21_ZSL;  // NV21
-      } else {
-        gr_format = HAL_PIXEL_FORMAT_YCrCb_420_SP;  // NV21
-      }
-    } else if (usage & BufferUsage::CAMERA_OUTPUT) {
-      if (format == HAL_PIXEL_FORMAT_YCbCr_420_888) {
-        gr_format = HAL_PIXEL_FORMAT_NV21_ZSL;  // NV21
-      } else {
-#ifdef USE_YCRCB_CAMERA_PREVIEW
-        gr_format = HAL_PIXEL_FORMAT_YCrCb_420_SP;  // NV21 preview
-#elif USE_YCRCB_CAMERA_PREVIEW_VENUS
-        gr_format = HAL_PIXEL_FORMAT_YCrCb_420_SP_VENUS;  // NV21 preview
-#else
-        gr_format = HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS;  // NV12 preview
-#endif
-      }
-    } else if (usage & BufferUsage::COMPOSER_OVERLAY) {
-      // XXX: If we still haven't set a format, default to RGBA8888
-      gr_format = HAL_PIXEL_FORMAT_RGBA_8888;
-    } else if (format == HAL_PIXEL_FORMAT_YCbCr_420_888) {
-      // If no other usage flags are detected, default the
-      // flexible YUV format to NV21_ZSL
-      gr_format = HAL_PIXEL_FORMAT_NV21_ZSL;
-    }
-  }
-
-  return gr_format;
-}
-
-/* The default policy is to return cached buffers unless the client explicity
- * sets the PRIVATE_UNCACHED flag or indicates that the buffer will be rarely
- * read or written in software. */
-bool Allocator::UseUncached(uint64_t usage) {
-  if ((usage & GRALLOC_USAGE_PRIVATE_UNCACHED) || (usage & BufferUsage::PROTECTED)) {
-    return true;
-  }
-
-  // CPU read rarely
-  if ((usage & BufferUsage::CPU_READ_MASK) == static_cast<uint64_t>(BufferUsage::CPU_READ_RARELY)) {
-    return true;
-  }
-
-  // CPU  write rarely
-  if ((usage & BufferUsage::CPU_WRITE_MASK) ==
-      static_cast<uint64_t>(BufferUsage::CPU_WRITE_RARELY)) {
-    return true;
-  }
-
-  if ((usage & BufferUsage::SENSOR_DIRECT_DATA) || (usage & BufferUsage::GPU_DATA_BUFFER)) {
-    return true;
-  }
-
-  return false;
-}
-
 void Allocator::GetIonHeapInfo(uint64_t usage, unsigned int *ion_heap_id, unsigned int *alloc_type,
                                unsigned int *ion_flags) {
   unsigned int heap_id = 0;
@@ -284,11 +213,17 @@ void Allocator::GetIonHeapInfo(uint64_t usage, unsigned int *ion_heap_id, unsign
       flags |= UINT(ION_SD_FLAGS);
     } else if (usage & BufferUsage::CAMERA_OUTPUT) {
       heap_id = ION_HEAP(SD_HEAP_ID);
+      if (usage & GRALLOC_USAGE_PRIVATE_CDSP) {
+        flags |= UINT(ION_SECURE | ION_FLAG_CP_CDSP);
+      }
       if (usage & BufferUsage::COMPOSER_OVERLAY) {
         flags |= UINT(ION_SC_PREVIEW_FLAGS);
       } else {
         flags |= UINT(ION_SC_FLAGS);
       }
+    } else if (usage & GRALLOC_USAGE_PRIVATE_CDSP) {
+      heap_id = ION_HEAP(ION_SECURE_CARVEOUT_HEAP_ID);
+      flags |= UINT(ION_SECURE | ION_FLAG_CP_CDSP);
     } else {
       heap_id = ION_HEAP(CP_HEAP_ID);
       flags |= UINT(ION_CP_FLAGS);
@@ -297,7 +232,7 @@ void Allocator::GetIonHeapInfo(uint64_t usage, unsigned int *ion_heap_id, unsign
 
   if (usage & BufferUsage::SENSOR_DIRECT_DATA) {
       if (use_system_heap_for_sensors_) {
-        ALOGI("gralloc::sns_direct_data with system heap");
+        ALOGI("gralloc::sns_direct_data with system_heap");
         heap_id |= ION_HEAP(ION_SYSTEM_HEAP_ID);
       } else {
         ALOGI("gralloc::sns_direct_data with adsp_heap");

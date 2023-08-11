@@ -74,8 +74,6 @@ AdrenoMemInfo::AdrenoMemInfo() {
         ::dlsym(libadreno_utils_, "adreno_init_memory_layout");
     *reinterpret_cast<void **>(&LINK_adreno_get_aligned_gpu_buffer_size) =
         ::dlsym(libadreno_utils_, "adreno_get_aligned_gpu_buffer_size");
-    *reinterpret_cast<void **>(&LINK_adreno_isSecureContextSupportedByGpu) =
-        ::dlsym(libadreno_utils_, "isSecureContextSupportedByGpu");
   } else {
     ALOGE(" Failed to load libadreno_utils.so");
   }
@@ -85,11 +83,6 @@ AdrenoMemInfo::AdrenoMemInfo() {
       !(strncmp(property, "true", PROPERTY_VALUE_MAX))) {
      gfx_ubwc_disable_ = true;
   }
-  property_get(DISABLE_AHARDWAREBUFFER_PROP, property, "0");
-  if (!(strncmp(property, "1", PROPERTY_VALUE_MAX)) ||
-      !(strncmp(property, "true", PROPERTY_VALUE_MAX))) {
-     gfx_ahardware_buffer_disable_ = true;
-  }
 }
 
 AdrenoMemInfo::~AdrenoMemInfo() {
@@ -98,6 +91,9 @@ AdrenoMemInfo::~AdrenoMemInfo() {
   }
 }
 
+void AdrenoMemInfo::AdrenoSetProperties(gralloc::GrallocProperties props) {
+  gfx_ahardware_buffer_disable_ = props.ahardware_buffer_disable;
+}
 
 void AdrenoMemInfo::AlignUnCompressedRGB(int width, int height, int format, int tile_enabled,
                                          unsigned int *aligned_w, unsigned int *aligned_h) {
@@ -213,6 +209,8 @@ ADRENOPIXELFORMAT AdrenoMemInfo::GetGpuPixelFormat(int hal_format) {
        return ADRENO_PIXELFORMAT_R16G16B16A16_FLOAT;
     case HAL_PIXEL_FORMAT_NV12_ENCODEABLE:
       return ADRENO_PIXELFORMAT_NV12;
+    case HAL_PIXEL_FORMAT_NV21_ENCODEABLE:
+      return ADRENO_PIXELFORMAT_NV21;
     case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS:
     case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS_UBWC:
       return ADRENO_PIXELFORMAT_NV12_EXT;
@@ -232,6 +230,62 @@ ADRENOPIXELFORMAT AdrenoMemInfo::GetGpuPixelFormat(int hal_format) {
       return ADRENO_PIXELFORMAT_D32_FLOAT;
     case HAL_PIXEL_FORMAT_STENCIL_8:
       return ADRENO_PIXELFORMAT_S8_UINT;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_4x4_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_4X4;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_4X4_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_5x4_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_5X4;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_5X4_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_5x5_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_5X5;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_5X5_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_6x5_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_6X5;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR:
+       return ADRENO_PIXELFORMAT_ASTC_6X5_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_6x6_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_6X6;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_6X6_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_8x5_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_8X5;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_8X5_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_8x6_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_8X6;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_8X6_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_8x8_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_8X8;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_8X8_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_10x5_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_10X5;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_10X5_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_10x6_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_10X6;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_10X6_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_10x8_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_10X8;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_10X8_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_10x10_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_10X10;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_10X10_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_12x10_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_12X10;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_12X10_SRGB;
+    case HAL_PIXEL_FORMAT_COMPRESSED_RGBA_ASTC_12x12_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_12X12;
+    case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR:
+      return ADRENO_PIXELFORMAT_ASTC_12X12_SRGB;
     default:
       ALOGE("%s: No map for format: 0x%x", __FUNCTION__, hal_format);
       break;
@@ -279,14 +333,6 @@ bool AdrenoMemInfo::IsPISupportedByGPU(int format, uint64_t usage) {
     return LINK_adreno_isPISupportedByGpu(format, usage);
   }
   return false;
-}
-
-bool AdrenoMemInfo::isSecureContextSupportedByGpu() {
-  if(LINK_adreno_isSecureContextSupportedByGpu) {
-    bool isSupported = LINK_adreno_isSecureContextSupportedByGpu();
-    return isSupported;
-  }
-  return true;
 }
 
 }  // namespace gralloc
